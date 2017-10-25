@@ -3,24 +3,33 @@
  * 
  * DESCRIPTION:
  * ------------
+ *  This ActionBar enables the registration of SIM/STORM images
+ *  (Or any kind of imaging modality where identical bead images 
+ *  can be acquired.
+ *  Please see the documentation in the publication
+ *  https://www.ncbi.nlm.nih.gov/pubmed/28924661
  *  
+ * INSTALLATION:
+ * -------------
+ * 0. Dependencies: This plugin depends from multiple packages
+ * 		- ThunderSTORM (If you want to use the shortcuts provided, optional)
+ *	 		https://zitmen.github.io/thunderstorm/
+ * 		- ActionBar (From the IBMP-CNRS Update Site)
+ * 			http://imagejdocu.tudor.lu/doku.php?id=plugin:utilities:action_bar:start
+ * 		- The PTBIOP Update site
+ * 1. Copy this file to your Fiji installation under
+ *  plugins > ActionBar
+ *  eg. C:\Fiji\plugins\ActionBar\BIOP_SIM_STORM_Tools
+ * 2. After restarting Fiji, you will find it under Plugins > ActionBar
+ * 
  */
 
-
-
- 
 // Install the BIOP Library
 call("BIOP_LibInstaller.installLibrary", "BIOP"+File.separator+"BIOPLib.ijm");
 
 bar_name = "BIOP SIM STORM Tools";
 bar_file = replace(bar_name, " ", "_")+".ijm";
 
-
-//runFrom = "jar:file:BIOP/BIOP_PTS.jar!/"+bar_file;
-
-//////////////////////////////////////////////////////////////////////////////////////////////
-// The line below is for debugging. Place this IJM file in the ActionBar folder within Plugins
-//////////////////////////////////////////////////////////////////////////////////////////////
 runFrom = "/plugins/ActionBar/"+bar_file;
 
 if(isOpen(bar_name)) {
@@ -347,65 +356,141 @@ function MLSSettings() {
 }
 
 function MLSGetPoints(sigma_SIM, tolerance_SIM, sigma_STORM, tolerance_STORM, corresp_thr ) {
-	if (nImages != 2) 
-		return;
+	
+	// Get folder of images
+	main_dir = getDirectory("Provide folder containing 'SIM' and 'STORM' acquisition folders");
+
+	sim_dir   = main_dir+File.separator+"SIM"+File.separator;
+	storm_dir = main_dir+File.separator+"STORM"+File.separator;
+	
+	files_sim   = getFileList(sim_dir);
+	files_storm = getFileList(storm_dir);
+	k=1;
+
+	sim_image = "SIM Stack";
+	storm_image = "STORM Stack";
+
+	sim_image_large = "SIM Stack Scaled";
+	storm_image_large = "STORM Stack Scaled";
+	
+	
+for (i=0; i< files_sim.length; i++ ) {
+	if (isImage(files_sim[i]) && isImage(files_storm[i]) ) {
 		
-	selectImage(1);
-	img1 = getTitle();
-	selectImage(2);
-	img2 = getTitle();
-
-	if (matches(img1, "(?i).*SIM.*")) {
-		sim_image   = img1;
-		storm_image = img2;
-	} else {
-		sim_image   = img2;
-		storm_image = img1;
+		run("Bio-Formats Windowless Importer", "open=["+sim_dir+files_sim[i]+"]");
+		rename("SIM "+k);
+		
+		run("Bio-Formats Windowless Importer", "open=["+storm_dir+files_storm[i]+"]");
+		rename("STORM "+k);
+		k++;
+		
 	}
+}
 
-	// SIM FUN
+	// Make a stack for each one
+	run("Images to Stack", "name=["+sim_image+"] title=SIM use");
+	run("Images to Stack", "name=["+storm_image+"] title=STORM use");
+
+	// Prepare for projection SIM
 	selectImage(sim_image);
 	
-	//run("Duplicate...", "title=[Blurred - "+sim_image+"]");
-	run("Scale...", "x=- y=- width=1024 height=1024 interpolation=Bilinear create average");
-	rename("Blurred - "+sim_image);
+	run("Scale...", "x=- y=- width=1024 height=1024 interpolation=Bilinear average process create");
+	rename(sim_image_large);
+	run("Z Project...", "projection=[Max Intensity]");
+	rename("Blurred - "+sim_image+" Projected");
 
 	run("Gaussian Blur...", "sigma="+sigma_SIM);
 	
-	run("Find Maxima...", "noise="+tolerance_SIM+" output=[Point Selection] exclude");
-	Roi.setName(sim_image+" Detections");
-	// Get Coordinates
-	getSelectionCoordinates(sim_x,sim_y);
-	//roiManager("Add");
-	setOption("Changes", false);
-
-	// STORM FUN
+	// Prepare for projection STORM
 	selectImage(storm_image);
-	//run("Duplicate...", "title=[Blurred - "+storm_image+"]");
-	run("Scale...", "x=- y=- width=1024 height=1024 interpolation=Bilinear create average");
-	rename("Blurred - "+storm_image);
 	
+	run("Scale...", "x=- y=- width=1024 height=1024 interpolation=Bilinear average process create");
+	rename(storm_image_large);
+	
+	run("Z Project...", "projection=[Max Intensity]");
+	rename("Blurred - "+storm_image+" Projected");
+
 	run("Gaussian Blur...", "sigma="+sigma_STORM);
+
+	// Do SIFT
+	affineMat = getDataArray("Initial Affine Transform", ",");
+
+	if(lengthOf(affineMat)< 5) {
+		// Run SIFT Target is Blurred STORM Image
+		run("Extract SIFT Correspondences", "source_image=[Blurred - "+sim_image+" Projected] target_image=[Blurred - "+storm_image+" Projected] initial_gaussian_blur=2 steps_per_scale_octave=12 minimum_image_size=32 maximum_image_size=512 feature_descriptor_size=4 feature_descriptor_orientation_bins=8 closest/next_closest_ratio=0.92 filter maximal_alignment_error=50 minimal_inlier_ratio=0.05 minimal_number_of_inliers=7 expected_transformation=Affine");
+		
+		// Grab the Affine Transform from the Log Window
+		affineMat= getMatrixFromLog();
+		
+		setDataArray("Initial Affine Transform", affineMat, ",");
+	} else {
+		for(i=0; i<affineMat.length;i++) {
+			affineMat[i] = parseFloat(affineMat[i]);
+		}
+	}
 	
-	run("Find Maxima...", "noise="+tolerance_STORM+" output=[Point Selection] exclude");
-	Roi.setName(storm_image+" Detections");
-	// Get Coordinates
-	getSelectionCoordinates(storm_x,storm_y);
-	//roiManager("Add");
-	setOption("Changes", false);
+	// Now work on the stack and find the nearest neighbors by transforming the SIM coordinates
+	selectImage(sim_image);
+	getDimensions(dx,dy,dc,dz,dt);
+
+	for(i=0; i<dz;i++) {
+		selectImage(sim_image_large);
+		setSlice(i+1);
+		run("Find Maxima...", "noise="+tolerance_SIM+" output=[Point Selection]");
+		getSelectionCoordinates(x_sim, y_sim);
+		getSelectionCoordinates(x_simt, y_simt);
+
+		
+		selectImage(storm_image_large);
+		setSlice(i+1);
+		run("Find Maxima...", "noise="+tolerance_STORM+" output=[Point Selection]");
+		getSelectionCoordinates(x_storm, y_storm);
+
+		// Transform SIM corrdinates
+		applyArray(x_simt,y_simt, affineMat);
+
+		// Find nearest neighbors and append
+		idx = getCorrespondences(x_simt, y_simt, x_storm, y_storm, corresp_thr);
+		
+		// Now save the points in the right order
+		orderPoints(idx, x_sim, y_sim, x_storm, y_storm);
+	}
 	
 	
-	idx = getCorrespondences(sim_x, sim_y, storm_x, storm_y, corresp_thr);
 	
-	// Now save the points in the right order
-	orderPoints(idx, sim_x, sim_y, storm_x, storm_y);
-	
+}
+
+
+function getMatrixFromLog() {
+	thelog = split(getInfo("log"),"\n");
+	str = thelog[thelog.length-1];
+	if(startsWith(str, "Estimated transformation model")) {
+		arr = substring(str, indexOf(str,"[[")+2, lastIndexOf(str, "]]"));
+		arr = split(arr,", ");
+		for(i=0; i<arr.length;i++) {
+			arr[i] = replace(arr[i],"[\\[\\]]","");
+			arr[i] = parseFloat(arr[i]);
+		}
+		return arr;
+	} else {
+		return "";
+	}
+}
+
+function applyArray(x,y, M) {
+	for(i=0; i<x.length;i++) {
+		xt = (M[0] * x[i]) + (M[1] * y[i]) + M[2];
+		yt = (M[3] * x[i]) + (M[4] * y[i]) + M[5];
+		x[i] = xt;
+		y[i] = yt;
+	}
 }
 
 function orderPoints(idx, sim_x, sim_y, storm_x, storm_y) {
 
 	// If the Ordered SIM points ROI exists, append to it
 	id = findRoiWithName("Ordered SIM Points");
+
 	if (id > -1) {
 		roiManager("Select", id);
 		getSelectionCoordinates(new_sim_x, new_sim_y);
@@ -429,7 +514,6 @@ function orderPoints(idx, sim_x, sim_y, storm_x, storm_y) {
 		}
 	}
 
-	
 	// Make new ROIs or append
 	
 	if (id > -1) {
@@ -443,6 +527,7 @@ function orderPoints(idx, sim_x, sim_y, storm_x, storm_y) {
 		Roi.setName("Ordered STORM Points");
 		roiManager("Update");
 	} else {
+		
 		makeSelection("points", new_sim_x, new_sim_y);
 		Roi.setName("Ordered SIM Points");
 		roiManager("Add");
@@ -455,24 +540,6 @@ function orderPoints(idx, sim_x, sim_y, storm_x, storm_y) {
 	
 function getCorrespondences(x1,y1,x2,y2, thr) {
 	
-	// Get hot to transform roughly STORM TO SIM
-
-	scale_x = getData("Rough Scale X");
-	scale_y = getData("Rough Scale Y");
-	tx      = getData("Rough Translate X");
-	ty      = getData("Rough Translate Y");
-
-	// Convert y2,x2 using above transform
-	x2t = newArray(x2.length);
-	y2t = newArray(x2.length);
-	for (i=0; i < x2.length; i++) {
-		x2t[i] = x2[i]* scale_x + tx;
-		y2t[i] = y2[i]* scale_y + ty;
-	}
-	makeSelection("Point", x2t, y2t);
-	Roi.setName("Roughly Registered STORM");
-	//roiManager("Add");
-	
 	// Brownian motion setup, just accept for the closest
 	// Works OK for low densities
 	idx = newArray(0);
@@ -480,7 +547,7 @@ function getCorrespondences(x1,y1,x2,y2, thr) {
 		dMin = 1000;
 		ix = NaN;
 		for(j=0; j< x2.length; j++) {
-			d = dist(x1[i],y1[i], x2t[j], y2t[j]);
+			d = dist(x1[i],y1[i], x2[j], y2[j]);
 			if ( d < thr && d < dMin ) {
 				dMin = d;
 				ix = j;
@@ -491,45 +558,6 @@ function getCorrespondences(x1,y1,x2,y2, thr) {
 	return idx;
 }
 
-function calibrateImage() {
-	// Find the SIM and give three points...
-	waitForUser("Define N positions in the SIM Image, then OK");
-	getSelectionCoordinates(xsi, ysi);
-	
-	waitForUser("Define N positions in the STORM Image, then OK");
-	getSelectionCoordinates(xst, yst);
-
-	// Now find scaling and translation.
-	scale_x = 0;
-	scale_y = 0;
-	tx     = 0;
-	ty     = 0;
-	for(i=0; i<xst.length; i++) {
-		scale_x += ( xsi[i] - xsi[(i+1)%3] ) / ( xst[i] - xst[(i+1)%3] );
-		scale_y += ( ysi[i] - ysi[(i+1)%3] ) / ( yst[i] - yst[(i+1)%3] );
-		print(tx/(i+1), ty/(i+1), scale_x/(i+1), scale_y/(i+1));
-	}
-
-
-	scale_x /= xst.length;
-	scale_y /= xst.length;
-	
-	for(i=0; i<xst.length; i++) {
-		tx += xsi[i] - xst[i]*scale_x;
-		ty += ysi[i] - yst[i]*scale_y;
-	}
-
-	tx /= xst.length;
-	ty /= xst.length;
-	
-	setData("Rough Scale X", scale_x);
-	setData("Rough Scale Y", scale_y);
-	setData("Rough Translate X", tx);
-	setData("Rough Translate Y", ty);
-	
-
-	
-}
 
 function reconstructSTORM(storm_file_path) {
 	setBatchMode(true);
@@ -616,7 +644,7 @@ loadParameters();
 label=Detla Processing Parameters
 icon=noicon
 arg=<macro>
-ProcessingParameters();
+FWHMParameters();
 </macro>
 </line>
 
@@ -672,11 +700,38 @@ icon=noicon
 arg=<macro>
 MLSSettings();
 </macro>
+</line>
 
+<line>
 <button>
-label=Find Registration Points
+label=Test Registration Detection
 icon=noicon
 arg=<macro>
+waitForUser("Open a SIM or STORM bead image");
+image_name = getTitle();
+if(matches(image_name,".*SIM.*")) {
+	blur = getDataD("SIM Gaussian Filter Radius px", 2);
+} else {
+	blur = getDataD("STORM Gaussian Filter Radius px", 2);
+}
+
+run("Scale...", "x=- y=- width=1024 height=1024 interpolation=Bilinear average process create");
+run("Gaussian Blur...", "sigma="+blur);
+showMessage("After closing this message, test the Find Maxima value that\nwill best match the bead detection");
+run("Find Maxima...");
+ MLSSettings();
+run("Close All");
+
+</macro>
+
+</line>
+
+<line>
+<button>
+label=Create Registration Points
+icon=noicon
+arg=<macro>
+
 sigma_SIM       = getData("SIM Gaussian Filter Radius px");
 tolerance_SIM   = getData("SIM Maxima Finder Noise Tolerance");
 sigma_STORM     = getData("STORM Gaussian Filter Radius px");
@@ -684,47 +739,8 @@ tolerance_STORM = getData("STORM Maxima Finder Noise Tolerance");
 corresp_thr     = getData("Points Distance Threshold px");
 
 MLSGetPoints( sigma_SIM, tolerance_SIM, sigma_STORM, tolerance_STORM, corresp_thr );
-</macro>
-</line>
+run("Close All");
 
-<line>
-<button>
-label=Batch Find Points
-icon=noicon
-arg=<macro>
-sigma_SIM       = getData("SIM Gaussian Filter Radius px");
-tolerance_SIM   = getData("SIM Maxima Finder Noise Tolerance");
-sigma_STORM     = getData("STORM Gaussian Filter Radius px");
-tolerance_STORM = getData("STORM Maxima Finder Noise Tolerance");
-corresp_thr     = getData("Points Distance Threshold px");
-
-main_dir = getDirectory("Provide folder containing 'SIM' and 'STORM' acquisition folders");
-
-sim_dir   = main_dir+File.separator+"SIM"+File.separator;
-storm_dir = main_dir+File.separator+"STORM"+File.separator;
-
-files_sim   = getFileList(sim_dir);
-files_storm = getFileList(storm_dir);
-
-for (i=0; i< files_sim.length; i++ ) {
-	if (isImage(files_sim[i]) && isImage(files_storm[i]) ) {
-		run("Bio-Formats Windowless Importer", "open=["+sim_dir+files_sim[i]+"]");
-		run("Bio-Formats Windowless Importer", "open=["+storm_dir+files_storm[i]+"]");
-		MLSGetPoints( sigma_SIM, tolerance_SIM, sigma_STORM, tolerance_STORM, corresp_thr );
-		run("Close All");
-	}
-}
-</macro>
-
-</line>
-
-
-<line>
-<button>
-label=Rough Calibration
-icon=noicon
-arg=<macro>
-calibrateImage();
 </macro>
 
 </line>
@@ -737,7 +753,7 @@ arg=<macro>
 // Get ROIs
 if(roiManager("Count") != 2) {
 	roiManager("Reset");
-	roiFile = File.openDialog("Choose File With Matching point ROIs");
+	roiFile = File.openDialog("Choose ROI zip File With Matching point ROIs");
 	roiManager("Open", roiFile);
 }
 
@@ -790,7 +806,7 @@ for(i=0; i<x.length; i++) {
 makeSelection("points", x,y);
 
 
-run("Moving Least Squares", "source=["+sim_image+"] target=["+storm_image+"] method=Affine alpha=1.000 gridsize=0.000 forward");
+run("Moving Least Squares", "source=["+sim_image+"] target=["+storm_image+"] method=Affine alpha=1.000 gridsize=0.000");
 run("Enhance Contrast", "saturated=0.35");
 rename("Registered - "+sim_image);
 run("Merge Channels...", "c1=[Registered - "+sim_image+"] c2=["+storm_image+"] keep create");
