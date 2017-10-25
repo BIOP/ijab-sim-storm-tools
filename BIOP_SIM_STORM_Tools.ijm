@@ -14,12 +14,16 @@
  * 0. Dependencies: This plugin depends from multiple packages
  * 		- ThunderSTORM (If you want to use the shortcuts provided, optional)
  *	 		https://zitmen.github.io/thunderstorm/
+ *	 		
  * 		- ActionBar (From the IBMP-CNRS Update Site)
  * 			http://imagejdocu.tudor.lu/doku.php?id=plugin:utilities:action_bar:start
+ * 			
  * 		- The PTBIOP Update site
+ * 		
  * 1. Copy this file to your Fiji installation under
  *  plugins > ActionBar
- *  eg. C:\Fiji\plugins\ActionBar\BIOP_SIM_STORM_Tools
+ *  eg. C:\Fiji\plugins\ActionBar\BIOP_SIM_STORM_Tools.ijm
+ *  
  * 2. After restarting Fiji, you will find it under Plugins > ActionBar
  * 
  */
