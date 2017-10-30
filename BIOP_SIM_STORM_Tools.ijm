@@ -562,67 +562,6 @@ function getCorrespondences(x1,y1,x2,y2, thr) {
 	return idx;
 }
 
-
-function reconstructSTORM(storm_file_path) {
-	setBatchMode(true);
-	// File name for new image name
-	storm_file = substring(storm_file_path, lastIndexOf(storm_file_path, File.separator), lengthOf(storm_file_path)-4);
-	run("Results... ", "open="+storm_file_path);
-
-	imageSizeX = 42000 ; // nm
-	imageSizeY = 42000 ;
-	imageSizeZ = 800 ;
-	
-	voxelSize = 10; //nm
-	
-	imagePixelNumberX = imageSizeX / voxelSize ;
-	imagePixelNumberY = imageSizeY / voxelSize ;
-	imagePixelNumberZ = imageSizeZ / voxelSize ;
-
-	storm_image_title = "Reconstructed from "+storm_file;
-	newImage(storm_image_title, "32-bit black", imagePixelNumberX, imagePixelNumberY, imagePixelNumberZ);
-	run("Properties...", "unit=micron pixel_width="+(voxelSize/1000)+" pixel_height="+(voxelSize/1000)+" voxel_depth="+(voxelSize/1000));
-
-	totalRow = nResults;
-	for (rowIndex = 0 ; rowIndex < totalRow ; rowIndex++){
-		xRaw 		= getResult("Xc",rowIndex);
-		yRaw 		= getResult("Yc",rowIndex);
-		zRaw 		= getResult("Zc",rowIndex);
-		intensity 	= getResult("I",rowIndex);
-		//intensity 	= getResult("I",rowIndex);
-		
-		xCorr = round (xRaw/voxelSize);
-		yCorr = round (yRaw/voxelSize);
-		zCorr = round (zRaw/voxelSize);
-		//print(xCorr+"-"+yCorr+"-"+rowIndex+"-"+zCorr);
-		intensityCorr  = round (intensity/10); 
-
-		print3DCore(xCorr, yCorr, zCorr,intensityCorr);	// only core of the spot
-		
-	}
-	updateDisplay();
-	run("Z Project...", "projection=[Max Intensity]");
-	run("Brightness/Contrast...");
-	// Add Blur if wanted
-	
-	setBatchMode(false);
-}
-	
-
-//////////////////////////////////////////////////////////////////////////////// Functions
-
-function print3DCore(xCorr, yCorr, zCorr,intensity){
-	Stack.setSlice(zCorr);
-	addIntensityToPixel(xCorr, yCorr, intensity);
-}
-
-function addIntensityToPixel(xCorr, yCorr, intensity){
-	currentIntensity = getPixel(xCorr, yCorr);
-	actualIntensity = intensity + currentIntensity;
-	setPixel(xCorr, yCorr, actualIntensity);
-}
-
-
 </codeLibrary>
 
 <text><html><font size=2.5 color=#0C2981>Parameters
@@ -642,61 +581,7 @@ loadParameters();
 </macro>
 </line>
 
-<text><html><font size=2.5 color=#0C2981>Beads FWHM XYZ
-<line>
-<button>
-label=Detla Processing Parameters
-icon=noicon
-arg=<macro>
-FWHMParameters();
-</macro>
-</line>
-
-<line>
-<button>
-label= current Image
-icon=noicon
-arg=<macro>
-FWHMXYZMeasure();
-</macro>
-<button>
-label= Folder
-icon=noicon
-arg=<macro>
-dir = getDirectory("Gimme");
-setData("Image Folder", dir);
-setBatchMode(true);
-nI = getNumberImages();
-for(i=0; i<nI;i++) {
-	openImage(i);
-	FWHMXYZMeasure();
-	run("Close All");
-}
-setBatchMode(false);
-showMessage("DODONEEEEEE");
-</macro>
-</line>
-
-<text><html><font size=2.5 color=#0C2981>ThunderSTORM Shortcuts
-<line>
-<button>
-label=Astigmatism Calibration
-icon=noicon
-arg=<macro>
-run("Cylindrical lens calibration");
-</macro>
-</line>
-
-<line>
-<button>
-label=Run Analysis
-icon=noicon
-arg=<macro>
-run("Run analysis");
-</macro>
-</line>
-
-<text><html><font size=2.5 color=#0C2981>Warp SIM STORM
+<text><html><font size=2.5 color=#0C2981>Warp SIM/STORM
 <line>
 <button>
 label=Working Parameters
@@ -822,23 +707,65 @@ run("Magenta");
 run("Enhance Contrast", "saturated=0.35");
 saveAs("Tiff", "");
 </macro>
-
 </line>
-<text><html><font size=2.5 color=#0C2981>Reconstruct STORM
+<text><html><font size=2.5 color=#0C2981>
+<text><html><font size=2.5 color=#0C2981>Helper Tools
+<text><html><font size=2.5 color=#4295f4>&nbsp;&nbsp;Beads FWHM XYZ
 <line>
 <button>
-label=From NIS-Elements Export
+label=Detla Processing Parameters
 icon=noicon
 arg=<macro>
-storm_file_path = File.openDialog("txt file with point coordinates");
-reconstructSTORM(storm_file_path) 
+FWHMParameters();
 </macro>
 </line>
 
+<line>
+<button>
+label= current Image
+icon=noicon
+arg=<macro>
+FWHMXYZMeasure();
+</macro>
+<button>
+label= Folder
+icon=noicon
+arg=<macro>
+dir = getDirectory("Beads Folder");
+setData("Image Folder", dir);
+setBatchMode(true);
+nI = getNumberImages();
+for(i=0; i<nI;i++) {
+	openImage(i);
+	FWHMXYZMeasure();
+	run("Close All");
+}
+setBatchMode(false);
+showMessage("Done");
+</macro>
+</line>
+
+<text><html><font size=2.5 color=#4295f4>&nbsp;&nbsp;ThunderSTORM Shortcuts
+<line>
+<button>
+label=Astigmatism Calibration
+icon=noicon
+arg=<macro>
+run("Cylindrical lens calibration");
+</macro>
+</line>
 
 <line>
 <button>
-label=Close Others
+label=Run Analysis
+icon=noicon
+arg=<macro>
+run("Run analysis");
+</macro>
+</line>
+<line>
+<button>
+label=Close All but Current Image
 icon=noicon
 arg=<macro>
 close("\\Others");
